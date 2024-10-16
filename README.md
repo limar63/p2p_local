@@ -15,3 +15,7 @@ When you have an already running node - you can create the next ones in another 
 127.0.0.1:8080 is the node you would connect to (the first node).
 
 Connect each tab individually, each with a port available.
+
+
+Regards to how the project is structured - there is an initial loop for getting input from the console and then 2 separate async tasks are running - one for a server role of the role and another for a client role. 
+Wanted to split functions for each role in 2 different files, but they are reusing some functions, and not reusing enough to create another file for "helper" methods so decided to keep them all in 1 big blob.
