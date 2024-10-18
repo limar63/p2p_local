@@ -7,5 +7,3 @@ edition = "2021"
 tokio = { version = "1.40.0", features = ["full"] }
 fmt = "0.1.0"
 bincode = "2.0.0-rc.3"
-futures = "0.3.31"
-futures-lite = "2.3.0"
