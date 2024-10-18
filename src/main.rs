@@ -3,10 +3,11 @@ use crate::network::{client_task, server_task, PeerNode};
 
 use std::collections::HashSet;
 use std::net::SocketAddr;
-use std::sync::Arc;
-use tokio::sync::broadcast::{Receiver, Sender};
+use std::sync::{Arc, Mutex};
+//use tokio::sync::broadcast::{Receiver, Sender};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
-use tokio::sync::{broadcast, Mutex};
+use tokio::sync::{watch};
+use tokio::sync::watch::{Receiver, Sender};
 
 mod cli;
 mod messages;
@@ -16,7 +17,7 @@ mod network;
 async fn main() {
     let created_peer: PeerNode = cli_loop();
 
-    let (message_broadcast, _): (Sender<String>, Receiver<String>) = broadcast::channel(50);
+    let (tx, rx): (Sender<()>, Receiver<()>) = watch::channel(());
     let (address_sender, address_receiver): (
         UnboundedSender<(SocketAddr, bool)>,
         UnboundedReceiver<(SocketAddr, bool)>,
@@ -27,7 +28,7 @@ async fn main() {
     server_task(
         created_peer.port,
         created_peer.period,
-        message_broadcast.clone(),
+        tx.clone(),
         Arc::clone(&addresses),
     );
 
@@ -35,7 +36,7 @@ async fn main() {
     client_task(
         address_receiver,
         address_sender.clone(),
-        message_broadcast.clone(),
+        rx.clone(),
         Arc::clone(&addresses),
         created_peer.port,
     );

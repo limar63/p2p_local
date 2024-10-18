@@ -1,15 +1,14 @@
 use crate::messages::Msg;
 
 use std::collections::HashSet;
-use std::net::{SocketAddr};
-use std::sync::Arc;
+use std::net::SocketAddr;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::broadcast::{Receiver, Sender};
+use tokio::sync::watch::{Receiver, Sender};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
-use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 
 const LOCAL_IP: &str = "127.0.0.1";
@@ -24,7 +23,7 @@ pub(crate) struct PeerNode {
 pub fn client_task(
     mut address_receiver: UnboundedReceiver<(SocketAddr, bool)>,
     address_sender: UnboundedSender<(SocketAddr, bool)>,
-    writing_sync_channel: Sender<String>,
+    reading_sync_channel: Receiver<()>,
     addresses: Arc<Mutex<HashSet<SocketAddr>>>,
     port: u16,
 ) {
@@ -34,17 +33,17 @@ pub fn client_task(
     tokio::spawn(async move {
         loop {
             if let Some((server_addr, freshness)) = address_receiver.recv().await {
-                let sender_loop_clone = address_sender.clone();
-                let sender = writing_sync_channel.subscribe();
-                let addresses_looped_clone = Arc::clone(&addresses);
+                let address_sender = address_sender.clone();
+                let reading_sync_channel = reading_sync_channel.clone();
+                let addresses = addresses.clone();
                 tokio::spawn(async move {
                     let (server_connection_stream, server_addr) =
                         initiating_handshake(server_addr, freshness, client_addr).await.map_err(|_| "join_error")??;
                     let (read_half, write_half, server_addr) =
-                        reading_handshake_response(sender_loop_clone, server_connection_stream, server_addr).await.map_err(|_| "join_error")??;
+                        reading_handshake_response(address_sender, server_connection_stream, server_addr).await.map_err(|_| "join_error")??;
                     let connection_maintenance =
-                        maintaining_connection(read_half, write_half, server_addr, addresses_looped_clone, sender).await.map_err(|_| "join_error")?;
-                    eprintln!("{:?}", connection_maintenance);
+                        maintaining_connection(read_half, write_half, server_addr, addresses, reading_sync_channel).await.map_err(|_| "join_error")?;
+                    eprintln!("Connection with node {} is gone for the reason: {:?}", &server_addr, connection_maintenance);
                     connection_maintenance
                 });
             }
@@ -107,10 +106,10 @@ fn reading_handshake_response(
 pub fn server_task(
     port: u16,
     period: u64,
-    writing_sync_channel: Sender<String>,
+    writing_sync_channel: Sender<()>,
     addresses: Arc<Mutex<HashSet<SocketAddr>>>,
 ) {
-    start_sender_task(period, writing_sync_channel.clone(), Arc::clone(&addresses));
+    start_sender_task(period, writing_sync_channel.clone(), addresses.clone());
     tokio::spawn(async move {
         let listener = TcpListener::bind(format!("{}:{}", LOCAL_IP, port))
             .await
@@ -124,18 +123,18 @@ pub fn server_task(
         loop {
             match listener.accept().await {
                 Ok((socket, _)) => {
-                    let loop_addresses = Arc::clone(&addresses);
-                    let sender = writing_sync_channel.subscribe();
+                    let addresses = addresses.clone();
+                    let writing_sync_channel = writing_sync_channel.subscribe();
 
                     // Spawn a new task to handle the connected node
                     tokio::spawn(async move {
                         let (msg, client_addr, stream, addresses) =
-                            server_handshake_reading(socket, loop_addresses).await.map_err(|_| "join_error")??;
+                            server_handshake_reading(socket, addresses).await.map_err(|_| "join_error")??;
                         let (read_half, write_half, client_addr, addresses) =
                             server_handshake_responding(msg, client_addr, stream, addresses).await.map_err(|_| "join_error")??;
                         let connection_maintenance =
-                            maintaining_connection(read_half, write_half, client_addr,addresses, sender).await.map_err(|_| "join_error")?;
-                        eprintln!("{:?}", connection_maintenance);
+                            maintaining_connection(read_half, write_half, client_addr,addresses, writing_sync_channel).await.map_err(|_| "join_error")?;
+                        eprintln!("Connection with node {} is gone for the reason: {:?}", &client_addr, connection_maintenance);
                         connection_maintenance
                     });
                 }
@@ -149,23 +148,26 @@ pub fn server_task(
 
 fn start_sender_task(
     seconds: u64,
-    channel: Sender<String>,
+    channel: Sender<()>,
     connections: Arc<Mutex<HashSet<SocketAddr>>>,
 ) {
     let duration = Duration::from_secs(seconds);
     tokio::spawn(async move {
         loop {
-            let connections = connections.lock().await;
-            if connections.len() > 0 {
-                match channel.send("Send".to_string()) {
-                    Ok(_) => {
-                        println!(
-                            "Sending message {} to {}",
-                            MESSAGE,
-                            format!("{:?}", *connections).replace("\"", "")
-                        )
+            //creating scope to make sure compiler doesn't complain about std mutex
+            {
+                let connections = connections.lock().unwrap();
+                if connections.len() > 0 {
+                    match channel.send(()) {
+                        Ok(_) => {
+                            println!(
+                                "Sending message {} to {}",
+                                MESSAGE,
+                                format!("{:?}", *connections).replace("\"", "")
+                            )
+                        }
+                        Err(e) => eprintln!("Error while sending synced write command: {}", e),
                     }
-                    Err(e) => eprintln!("Error sending message {}", e),
                 }
             }
 
@@ -189,7 +191,7 @@ fn server_handshake_reading(
                     let valid_bytes = &buf[..n];
                     match Msg::decode_message(valid_bytes) {
                         Ok(Msg::FirstHandClientHandshake(address)) => {
-                            let message = Msg::FirstHandServerResponse(addresses.lock().await.clone())
+                            let message = Msg::FirstHandServerResponse(addresses.lock().unwrap().clone())
                                 .encode_message()
                                 .unwrap();
                             return Ok((message, address, socket, addresses))
@@ -215,7 +217,7 @@ fn server_handshake_responding(
     tokio::spawn(async move {
         match socket.write_all(&*message).await {
             Ok(_) => {
-                addresses.lock().await.insert(addr);
+                addresses.lock().unwrap().insert(addr);
                 let (reader, writer) = socket.into_split();
                 println!("Node {} succesfully connected", addr);
                 Ok((reader, writer, addr, addresses))
@@ -236,7 +238,7 @@ fn listening_to_a_node(
         loop {
             match read_stream.read(&mut buf).await {
                 Ok(0) => {
-                    addresses.lock().await.remove(&addr);
+                    addresses.lock().unwrap().remove(&addr);
                     return Err(format!("Connection closed: {}", addr.to_string()));
                 }
 
@@ -253,27 +255,16 @@ fn listening_to_a_node(
 }
 fn node_writing(
     mut writing_stream: OwnedWriteHalf,
-    mut writing_sync_channel: Receiver<String>,
+    mut reading_sync_channel: Receiver<()>,
     addr: String,
 ) -> JoinHandle<Result<(), String>> {
     tokio::spawn(async move {
-        loop {
-            match writing_sync_channel.recv().await {
-                Ok(msg) => {
-                    if msg == "Send" {
-                        if let Err(e) = writing_stream.write_all(MESSAGE.as_ref()).await {
-                            return Err(e.to_string());
-                        }
-                    }
-                }
-                Err(e) => {
-                    return Err::<(), String>(format!(
-                        "Error sending message {} to the socket {}",
-                        e, addr
-                    ))
-                }
+        while reading_sync_channel.changed().await.is_ok() {
+            if let Err(e) = writing_stream.write_all(MESSAGE.as_ref()).await {
+                return Err(e.to_string());
             }
         }
+        Err(format!("Receiver channel for {} is not available", addr))
     })
 }
 
@@ -282,9 +273,9 @@ fn maintaining_connection(
     write_half: OwnedWriteHalf,
     peer_address: SocketAddr,
     addresses: Arc<Mutex<HashSet<SocketAddr>>>,
-    writing_sync_channel: Receiver<String>) -> JoinHandle<Result<(), String>> {
+    reading_sync_channel: Receiver<()>) -> JoinHandle<Result<(), String>> {
     tokio::spawn(async move {
-        let write_task = node_writing(write_half, writing_sync_channel, peer_address.to_string().clone());
+        let write_task = node_writing(write_half, reading_sync_channel, peer_address.to_string().clone());
         let listening_task = listening_to_a_node(read_half, peer_address, addresses);
 
         let result = tokio::select! {
