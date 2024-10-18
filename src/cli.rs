@@ -1,4 +1,4 @@
-use crate::tcp_shenanigans::PeerNode;
+use crate::network::PeerNode;
 use std::collections::HashMap;
 use std::io;
 use std::net::SocketAddr;

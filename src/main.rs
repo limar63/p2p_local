@@ -1,5 +1,5 @@
 use crate::cli::cli_loop;
-use crate::tcp_shenanigans::{client_task, server_task, PeerNode};
+use crate::network::{client_task, server_task, PeerNode};
 
 use std::collections::HashSet;
 use std::net::SocketAddr;
@@ -10,7 +10,7 @@ use tokio::sync::{broadcast, Mutex};
 
 mod cli;
 mod messages;
-mod tcp_shenanigans;
+mod network;
 
 #[tokio::main]
 async fn main() {
