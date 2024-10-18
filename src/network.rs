@@ -13,7 +13,7 @@ use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 
 const LOCAL_IP: &str = "127.0.0.1";
-const MESSAGE: &str = "Gossip message\n";
+const MESSAGE: &str = "Gossip message";
 #[derive(Debug)]
 pub(crate) struct PeerNode {
     pub(crate) period: u64,
