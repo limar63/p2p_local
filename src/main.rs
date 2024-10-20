@@ -25,16 +25,16 @@ async fn main() {
     //client task gets address receiver because I decided to delegate connecting to a node to that address receiver channel
     tokio::spawn(async move {client_task(
         address_receiver,
-        address_sender.clone(),
-        rx.clone(),
-        addresses_clone,
-        port,
+        address_sender,
+        rx,
+        addresses,
+        port
     ).await});
 
     tokio::spawn(async move {server_task(
         port,
         period,
-        tx.clone(),
-        addresses,
+        tx,
+        addresses_clone
     ).await}).await.unwrap();
 }

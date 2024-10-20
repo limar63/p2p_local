@@ -52,7 +52,7 @@ pub async fn client_task(
 async fn initiating_handshake(
     server_address: SocketAddr,
     freshness: HandshakeType,
-    client_address: SocketAddr,
+    client_address: SocketAddr
 )   -> Result<(TcpStream, SocketAddr), String> {
     let mut stream = TcpStream::connect(server_address).await.unwrap();
     let encoded_msg = encode_message(&Req::Handshake(client_address.clone(), freshness)).unwrap();
@@ -139,7 +139,7 @@ pub async fn server_task(
 fn start_sender_task(
     seconds: u64,
     channel: Sender<()>,
-    connections: Arc<Mutex<HashSet<SocketAddr>>>,
+    connections: Arc<Mutex<HashSet<SocketAddr>>>
 ) {
     let duration = Duration::from_secs(seconds);
     tokio::spawn(async move {
@@ -169,7 +169,7 @@ fn start_sender_task(
 
 async fn server_handshake_reading(
     mut socket: TcpStream,
-    addresses: Arc<Mutex<HashSet<SocketAddr>>>,
+    addresses: Arc<Mutex<HashSet<SocketAddr>>>
 ) -> Result<(Vec<u8>, SocketAddr, TcpStream, Arc<Mutex<HashSet<SocketAddr>>>), String> {
     let mut buf = [0; 1024];
     match socket.read(&mut buf).await {
@@ -213,7 +213,7 @@ async fn server_handshake_responding(
 async fn listening_to_a_node(
     mut read_stream: OwnedReadHalf,
     addr: SocketAddr,
-    addresses: Arc<Mutex<HashSet<SocketAddr>>>,
+    addresses: Arc<Mutex<HashSet<SocketAddr>>>
 ) -> Result<(), String> {
     let mut buf = [0; 1024];
     loop {
