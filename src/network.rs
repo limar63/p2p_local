@@ -267,5 +267,4 @@ async fn maintaining_connection(
     };
 
     result.map_err(|err|err.to_string())?
-
 }
