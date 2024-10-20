@@ -23,18 +23,20 @@ async fn main() {
         sender_clone.send((addr, Initial)).unwrap();
     }
 
-    tokio::spawn(async move {client_task(
-        address_receiver,
-        address_sender,
-        rx,
-        addresses,
-        port
-    ).await});
+    tokio::spawn(async move {
+        client_task(
+            address_receiver,
+            address_sender,
+            rx,
+            addresses,
+            port
+        ).await });
 
-    tokio::spawn(async move {server_task(
-        port,
-        period,
-        tx,
-        addresses_clone
-    ).await}).await.unwrap();
+    tokio::spawn(async move {
+        server_task(
+            port,
+            period,
+            tx,
+            addresses_clone
+        ).await }).await.unwrap();
 }
