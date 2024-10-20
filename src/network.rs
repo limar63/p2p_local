@@ -173,7 +173,6 @@ async fn server_handshake_reading(
     let mut buf = [0; 1024];
     match socket.read(&mut buf).await {
         Ok(0) => Err("connection closed".to_string()),
-
         Ok(n) => {
             let valid_bytes = &buf[..n];
             match decode_message(valid_bytes) {
@@ -202,7 +201,7 @@ async fn server_handshake_responding(
         Ok(_) => {
             addresses.lock().unwrap().insert(addr);
             let (reader, writer) = socket.into_split();
-            println!("Node {} succesfully connected", addr);
+            println!("Node {} successfully connected", addr);
             Ok((reader, writer, addr, addresses))
         }
         Err(e) => Err(e.to_string()),
@@ -229,7 +228,7 @@ async fn listening_to_a_node(
             ),
             Err(e) => {
                 addresses.lock().unwrap().remove(&addr);
-                return Err(format!("Failed to read from stream: {}", e.to_string()))
+                return Err(format!("Connection to node {} has failed: {}", addr, e.to_string()))
             }
         }
     }
@@ -247,7 +246,7 @@ async fn node_writing(
         }
     }
     addresses.lock().unwrap().remove(&addr);
-    Err(format!("Receiver channel for {} is not available", addr.to_string()))
+    Err(format!("Connection to node {} is no longer available", addr.to_string()))
 }
 
 async fn maintaining_connection(
@@ -258,8 +257,10 @@ async fn maintaining_connection(
     reading_sync_channel: Receiver<()>
 ) -> Result<(), String> {
     let addresses_clone = addresses.clone();
-    let write_task = tokio::spawn(async move{node_writing(write_half, reading_sync_channel, peer_address.clone(), addresses).await});
-    let listening_task = tokio::spawn(async move{listening_to_a_node(read_half, peer_address, addresses_clone).await});
+    let write_task = tokio::spawn(async move{
+        node_writing(write_half, reading_sync_channel, peer_address.clone(), addresses).await});
+    let listening_task = tokio::spawn(async move{
+        listening_to_a_node(read_half, peer_address, addresses_clone).await});
 
     let result = tokio::select! {
         res = write_task => res,
