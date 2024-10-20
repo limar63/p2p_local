@@ -224,7 +224,7 @@ async fn listening_to_a_node(
             }
 
             Ok(n) => println!(
-                "Received message {} from {}",
+                "Received message \"{}\" from {}",
                 String::from_utf8_lossy(&buf[..n]).into_owned(),
                 addr
             ),
