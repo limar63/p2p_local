@@ -166,7 +166,6 @@ fn start_sender_task(
     });
 }
 
-
 async fn server_handshake_reading(
     mut socket: TcpStream,
     addresses: Arc<Mutex<HashSet<SocketAddr>>>
