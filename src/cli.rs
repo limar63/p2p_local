@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 use std::io;
 use std::net::SocketAddr;
-use proptest::proptest;
 
 fn two_argument_parse(params: Vec<&str>) -> Option<(u64, u16, Option<SocketAddr>)> {
     if let Some(map_of_commands) = param_map_maker(params) {
@@ -81,6 +80,7 @@ pub fn cli_loop() -> (u64, u16, Option<SocketAddr>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use proptest::proptest;
 
     fn string_former(elements: Vec<&str>, separator: &str) -> String {
         elements.join(separator)
