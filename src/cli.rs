@@ -182,7 +182,6 @@ mod tests {
     }
 
     proptest! {
-        // Define the property-based test
         #[test]
         fn three_params_proptest(
             period in 0u64..=18446744073709551615u64,

@@ -22,7 +22,7 @@ async fn main() {
     if let Some(addr) = maybe_connection {
         sender_clone.send((addr, Initial)).unwrap();
     }
-    //client task gets address receiver because I decided to delegate connecting to a node to that address receiver channel
+
     tokio::spawn(async move {client_task(
         address_receiver,
         address_sender,
