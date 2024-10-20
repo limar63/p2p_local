@@ -235,6 +235,7 @@ async fn listening_to_a_node(
         }
     }
 }
+
 async fn node_writing(
     mut writing_stream: OwnedWriteHalf,
     mut reading_sync_channel: Receiver<()>,
