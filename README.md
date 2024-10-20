@@ -6,7 +6,7 @@ Here is an example of a command to run a node
 
 ./peer --period=5 --port=8080
 
-You need to choose the available port and rerun the program if chosen the wrong one, the period number are seconds of how often the current node will be gossiping connected nodes. The gossiping message is hard coded, you can find it by searching MESSAGE.
+You need to choose the available port and rerun the program if chosen the wrong one, the period number are seconds of how often the current node will be gossiping connected nodes. The gossiping message is hard coded, you can find it by searching MESSAGE inside network.rs.
 
 When you have an already running node - you can create the next ones in another tab by giving an extended run command
 
