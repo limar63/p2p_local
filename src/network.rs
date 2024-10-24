@@ -105,9 +105,9 @@ pub async fn server_task(
                 // Spawn a new task to handle the connected node
                 tokio::spawn(async move {
                     let (msg, client_addr) = server_handshake_reading(&mut socket, &addresses).await?;
-                    let (read_half, write_half) = server_handshake_responding(msg, client_addr, socket, &addresses).await?;
+                    let (read_half, write_half) = server_handshake_responding(msg, &client_addr, socket, &addresses).await?;
                     let connection_maintenance = maintaining_connection(read_half, write_half, &client_addr, addresses, reading_sync_channel).await;
-                    eprintln!("Connection with node {} is gone for the reason: {:?}", &client_addr, connection_maintenance);
+                    eprintln!("Connection with node {} is gone for the reason: {:?}", client_addr, connection_maintenance);
                     connection_maintenance
                 });
             }
@@ -175,15 +175,15 @@ async fn server_handshake_reading(
 
 async fn server_handshake_responding(
     message: Vec<u8>,
-    addr: SocketAddr,
+    addr: &SocketAddr,
     mut socket: TcpStream,
     addresses: &Arc<Mutex<HashSet<SocketAddr>>>
 ) -> Result<(OwnedReadHalf, OwnedWriteHalf), String> {
     match socket.write_all(&*message).await {
         Ok(_) => {
-            addresses.lock().unwrap().insert(addr);
+            addresses.lock().unwrap().insert(addr.clone());
             let (reader, writer) = socket.into_split();
-            println!("Node {} successfully connected", addr);
+            println!("Node {} successfully connected", &addr);
             Ok((reader, writer))
         }
         Err(e) => Err(e.to_string()),
