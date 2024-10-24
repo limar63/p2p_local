@@ -30,19 +30,10 @@ pub async fn client_task(
             let reading_sync_channel = reading_sync_channel.clone();
             let addresses = addresses.clone();
             tokio::spawn(async move {
-                let (server_connection_stream, server_addr) =
-                    tokio::spawn(async move {
-                        initiating_handshake(server_addr, freshness, client_addr).await
-                    }).await.map_err(|e|e.to_string())??;
-                let (read_half, write_half, server_addr, addresses) =
-                    tokio::spawn(async move {
-                        reading_handshake_response(address_sender, server_connection_stream, server_addr, addresses).await
-                    }).await.map_err(|e|e.to_string())??;
-                let connection_maintenance =
-                    tokio::spawn(async move {
-                        maintaining_connection(read_half, write_half, server_addr, addresses, reading_sync_channel).await
-                    }).await.map_err(|e|e.to_string())?;
-                eprintln!("Connection with node {} is gone for the reason: {:?}", &server_addr, connection_maintenance);
+                let server_connection_stream = initiating_handshake(&server_addr, freshness, client_addr).await?;
+                let (read_half, write_half) = reading_handshake_response(address_sender, server_connection_stream, &server_addr, &addresses).await?;
+                let connection_maintenance = maintaining_connection(read_half, write_half, &server_addr, addresses, reading_sync_channel).await;
+                eprintln!("Connection with node {} is gone for the reason: {:?}", server_addr, connection_maintenance);
                 connection_maintenance
             });
         }
@@ -50,24 +41,24 @@ pub async fn client_task(
 }
 
 async fn initiating_handshake(
-    server_address: SocketAddr,
+    server_address: &SocketAddr,
     freshness: HandshakeType,
     client_address: SocketAddr
-)   -> Result<(TcpStream, SocketAddr), String> {
+)   -> Result<TcpStream, String> {
     let mut stream = TcpStream::connect(server_address).await.unwrap();
     let encoded_msg = encode_message(&Req::Handshake(client_address.clone(), freshness)).unwrap();
     stream
         .write_all(&encoded_msg)
         .await
-        .map_err(|e| e.to_string()).map(|_| (stream, server_address))
+        .map_err(|e| e.to_string()).map(|_| stream)
 }
 
 async fn reading_handshake_response(
     address_sender: UnboundedSender<(SocketAddr, HandshakeType)>,
     mut stream: TcpStream,
-    server_addr: SocketAddr,
-    addresses: Arc<Mutex<HashSet<SocketAddr>>>
-) -> Result<(OwnedReadHalf, OwnedWriteHalf, SocketAddr, Arc<Mutex<HashSet<SocketAddr>>>), String> {
+    server_addr: &SocketAddr,
+    addresses: &Arc<Mutex<HashSet<SocketAddr>>>
+) -> Result<(OwnedReadHalf, OwnedWriteHalf), String> {
     let mut buf = [0; 1024];
     match stream.read(&mut buf).await {
         Ok(0) => Err("connection closed".to_string()),
@@ -75,7 +66,7 @@ async fn reading_handshake_response(
             let valid_bytes = &buf[..n];
             match decode_message(valid_bytes) {
                 Ok(Resp::Handshake(set)) => {
-                    addresses.lock().unwrap().insert(server_addr);
+                    addresses.lock().unwrap().insert(server_addr.clone());
                     for addr in set {
                         address_sender.send((addr, Peer)).unwrap();
                     };
@@ -83,7 +74,7 @@ async fn reading_handshake_response(
                 },
                 _ => return Err(String::from("Decoding message failed or not a handshake response sent"))
             }.map(|(r, w)| {
-                println!("Connected to server node {}", server_addr.to_string()); (r, w, server_addr, addresses)})
+                println!("Connected to server node {}", server_addr.to_string()); (r, w)})
         }
         Err(e) => Err(e.to_string()),
     }
@@ -107,24 +98,15 @@ pub async fn server_task(
 
     loop {
         match listener.accept().await {
-            Ok((socket, _)) => {
+            Ok((mut socket, _)) => {
                 let addresses = addresses.clone();
                 let reading_sync_channel = writing_sync_channel.subscribe();
 
                 // Spawn a new task to handle the connected node
                 tokio::spawn(async move {
-                    let (msg, client_addr, stream, addresses) =
-                        tokio::spawn(async move {
-                            server_handshake_reading(socket, addresses).await
-                        }).await.map_err(|e| e.to_string())??;
-                    let (read_half, write_half, client_addr, addresses) =
-                        tokio::spawn(async move {
-                            server_handshake_responding(msg, client_addr, stream, addresses).await
-                        }).await.map_err(|e| e.to_string())??;
-                    let connection_maintenance =
-                        tokio::spawn(async move {
-                            maintaining_connection(read_half, write_half, client_addr, addresses, reading_sync_channel).await
-                        }).await.map_err(|e| e.to_string())?;
+                    let (msg, client_addr) = server_handshake_reading(&mut socket, &addresses).await?;
+                    let (read_half, write_half) = server_handshake_responding(msg, client_addr, socket, &addresses).await?;
+                    let connection_maintenance = maintaining_connection(read_half, write_half, &client_addr, addresses, reading_sync_channel).await;
                     eprintln!("Connection with node {} is gone for the reason: {:?}", &client_addr, connection_maintenance);
                     connection_maintenance
                 });
@@ -167,9 +149,9 @@ fn start_sender_task(
 }
 
 async fn server_handshake_reading(
-    mut socket: TcpStream,
-    addresses: Arc<Mutex<HashSet<SocketAddr>>>
-) -> Result<(Vec<u8>, SocketAddr, TcpStream, Arc<Mutex<HashSet<SocketAddr>>>), String> {
+    socket: &mut TcpStream,
+    addresses: &Arc<Mutex<HashSet<SocketAddr>>>
+) -> Result<(Vec<u8>, SocketAddr), String> {
     let mut buf = [0; 1024];
     match socket.read(&mut buf).await {
         Ok(0) => Err("connection closed".to_string()),
@@ -182,7 +164,7 @@ async fn server_handshake_reading(
                         Peer => HashSet::new()
                     };
                     let message = encode_message(&Resp::Handshake(set)).unwrap();
-                    Ok((message, addr, socket, addresses))
+                    Ok((message, addr))
                 }
                 _ => Err(String::from("Decoding message failed or not a handshake response sent"))
             }
@@ -195,14 +177,14 @@ async fn server_handshake_responding(
     message: Vec<u8>,
     addr: SocketAddr,
     mut socket: TcpStream,
-    addresses: Arc<Mutex<HashSet<SocketAddr>>>
-) -> Result<(OwnedReadHalf, OwnedWriteHalf, SocketAddr, Arc<Mutex<HashSet<SocketAddr>>>), String> {
+    addresses: &Arc<Mutex<HashSet<SocketAddr>>>
+) -> Result<(OwnedReadHalf, OwnedWriteHalf), String> {
     match socket.write_all(&*message).await {
         Ok(_) => {
             addresses.lock().unwrap().insert(addr);
             let (reader, writer) = socket.into_split();
             println!("Node {} successfully connected", addr);
-            Ok((reader, writer, addr, addresses))
+            Ok((reader, writer))
         }
         Err(e) => Err(e.to_string()),
     }
@@ -252,15 +234,16 @@ async fn node_writing(
 async fn maintaining_connection(
     read_half: OwnedReadHalf,
     write_half: OwnedWriteHalf,
-    peer_address: SocketAddr,
+    peer_address: &SocketAddr,
     addresses: Arc<Mutex<HashSet<SocketAddr>>>,
     reading_sync_channel: Receiver<()>
 ) -> Result<(), String> {
+    let peer_address = peer_address.clone();
     let addresses_clone = addresses.clone();
     let write_task = tokio::spawn(async move{
-        node_writing(write_half, reading_sync_channel, peer_address.clone(), addresses).await});
+        node_writing(write_half, reading_sync_channel, peer_address.clone(), addresses_clone).await});
     let listening_task = tokio::spawn(async move{
-        listening_to_a_node(read_half, peer_address, addresses_clone).await});
+        listening_to_a_node(read_half, peer_address, addresses).await});
 
     let result = tokio::select! {
         res = write_task => res,
